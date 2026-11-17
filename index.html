@@ -1,0 +1,1968 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
+    />
+    <title>virtual vape</title>
+    <meta
+      name="description"
+      content="a minimalist virtual vape toy with reactive glow, physics-driven smoke clouds, and low-juice humor."
+    />
+    <meta property="og:title" content="virtual vape" />
+    <meta
+      property="og:description"
+      content="a minimalist virtual vape toy with reactive glow, physics-driven smoke clouds, and low-juice humor."
+    />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <style>
+      /* =======================================================================
+         1. THEME & CSS VARIABLES
+         All accent colors (--accent, --accent-rgb) are driven dynamically in JS
+         so ambient glow, floor shadow, LED tip, and UI details cross-fade cleanly.
+         ======================================================================= */
+      :root {
+        --bg: #ffffff;
+        --fg: #141414;
+        --muted: #8a8a8a;
+        --line: rgba(20, 20, 20, 0.12);
+        --accent: #ff4fa3;
+        --accent-rgb: 255, 79, 163;
+        --tip-x: 50%;
+        --tip-y: 3%;
+        --font-sans: "DM Sans", -apple-system, BlinkMacSystemFont, "Segoe UI",
+          Roboto, Helvetica, Arial, sans-serif;
+      }
+
+      body.dark {
+        --bg: #000000;
+        --fg: #f3f3f3;
+        --muted: #787878;
+        --line: rgba(255, 255, 255, 0.16);
+      }
+
+      * {
+        box-sizing: border-box;
+        -webkit-tap-highlight-color: transparent;
+      }
+
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background-color: var(--bg);
+        color: var(--fg);
+        font-family: var(--font-sans);
+        font-size: 13px;
+        line-height: 1.4;
+        text-transform: lowercase;
+        transition: background-color 360ms cubic-bezier(0.16, 1, 0.3, 1),
+          color 360ms cubic-bezier(0.16, 1, 0.3, 1);
+        user-select: none;
+        -webkit-user-select: none;
+        -webkit-touch-callout: none;
+      }
+
+      /* =======================================================================
+         2. FULL-VIEWPORT STAGE & SMOKE CANVAS
+         ======================================================================= */
+      .app {
+        position: relative;
+        width: 100vw;
+        height: 100dvh;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        touch-action: none;
+      }
+
+      #smoke-canvas {
+        position: fixed;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        pointer-events: none;
+        z-index: 20;
+      }
+
+      /* =======================================================================
+         3. MINIMAL CORNER UI & ACCESSIBLE CONTROLS
+         ======================================================================= */
+      .top-bar {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        z-index: 30;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: max(14px, env(safe-area-inset-top)) 20px 10px;
+        pointer-events: none;
+      }
+
+      .puff-counter {
+        font-variant-numeric: tabular-nums;
+        letter-spacing: 0.02em;
+        color: var(--muted);
+        font-size: 13px;
+        font-weight: 500;
+        padding: 10px 4px;
+        pointer-events: auto;
+      }
+
+      .puff-counter strong {
+        color: var(--fg);
+        font-weight: 500;
+        transition: color 360ms ease;
+      }
+
+      .top-actions {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        pointer-events: auto;
+      }
+
+      .ui-btn {
+        appearance: none;
+        background: transparent;
+        border: none;
+        color: var(--muted);
+        font-family: inherit;
+        font-size: 13px;
+        font-weight: 500;
+        letter-spacing: 0.01em;
+        min-height: 44px;
+        min-width: 44px;
+        padding: 0 12px;
+        border-radius: 10px;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        white-space: nowrap;
+        transition: color 180ms ease, background-color 180ms ease,
+          transform 140ms ease;
+      }
+
+      .ui-btn:hover {
+        color: var(--fg);
+        background-color: rgba(128, 128, 128, 0.08);
+      }
+
+      .ui-btn:active {
+        transform: scale(0.96);
+      }
+
+      .ui-btn:focus-visible {
+        outline: 2px solid rgba(var(--accent-rgb), 0.8);
+        outline-offset: 2px;
+      }
+
+      .ui-btn[aria-pressed="true"] {
+        color: var(--fg);
+      }
+
+      /* =======================================================================
+         4. VAPE STAGE, GLOW LAYERS & FLOOR SHADOW
+         ======================================================================= */
+      .stage {
+        position: relative;
+        z-index: 10;
+        width: 100%;
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        touch-action: none;
+      }
+
+      .vape-rig {
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 24px 48px;
+        will-change: transform;
+      }
+
+      /* Large soft radial ambient aura behind the vape */
+      .ambient-glow {
+        position: absolute;
+        left: 50%;
+        top: 46%;
+        width: min(68vw, 460px);
+        height: min(68vw, 460px);
+        transform: translate(-50%, -50%) scale(1);
+        border-radius: 50%;
+        pointer-events: none;
+        will-change: transform, opacity;
+        background: radial-gradient(
+          circle,
+          rgba(var(--accent-rgb), 0.24) 0%,
+          rgba(var(--accent-rgb), 0.1) 38%,
+          rgba(var(--accent-rgb), 0) 70%
+        );
+        opacity: 0.55;
+      }
+
+      body.dark .ambient-glow {
+        background: radial-gradient(
+          circle,
+          rgba(var(--accent-rgb), 0.42) 0%,
+          rgba(var(--accent-rgb), 0.18) 38%,
+          rgba(var(--accent-rgb), 0) 70%
+        );
+        opacity: 0.72;
+      }
+
+      /* Soft pastel/neon halo tightly hugging the device */
+      .vape-halo {
+        position: absolute;
+        left: 50%;
+        top: 48%;
+        width: 240px;
+        height: 270px;
+        transform: translate(-50%, -50%);
+        border-radius: 999px;
+        pointer-events: none;
+        filter: blur(32px);
+        will-change: transform, opacity;
+        background: radial-gradient(
+          ellipse at center,
+          rgba(var(--accent-rgb), 0.34) 0%,
+          rgba(var(--accent-rgb), 0) 72%
+        );
+        opacity: 0.42;
+      }
+
+      body.dark .vape-halo {
+        filter: blur(38px);
+        background: radial-gradient(
+          ellipse at center,
+          rgba(var(--accent-rgb), 0.62) 0%,
+          rgba(var(--accent-rgb), 0) 72%
+        );
+        opacity: 0.68;
+      }
+
+      /* Float wrapper handles GPU-driven bobbing, sway & inhale scale */
+      .vape-float {
+        position: relative;
+        z-index: 2;
+        will-change: transform, opacity;
+        transform-origin: center center;
+        transition: opacity 200ms cubic-bezier(0.16, 1, 0.3, 1);
+      }
+
+      .vape-float.is-switching-out {
+        opacity: 0;
+      }
+
+      .vape-body {
+        position: relative;
+        display: inline-block;
+        line-height: 0;
+      }
+
+      .vape-img {
+        display: block;
+        max-height: clamp(220px, 38vh, 330px);
+        max-width: min(74vw, 340px);
+        width: auto;
+        height: auto;
+        pointer-events: none;
+        -webkit-user-drag: none;
+        will-change: filter;
+        /* Light mode: layered 3D lift + subtle pastel accent halo */
+        filter: drop-shadow(0 18px 24px rgba(0, 0, 0, 0.14))
+          drop-shadow(0 5px 10px rgba(0, 0, 0, 0.08))
+          drop-shadow(0 0 22px rgba(var(--accent-rgb), 0.24));
+      }
+
+      body.dark .vape-img {
+        /* Dark mode: multi-layered neon inner illumination */
+        filter: drop-shadow(0 0 5px rgba(var(--accent-rgb), 0.55))
+          drop-shadow(0 0 18px rgba(var(--accent-rgb), 0.42))
+          drop-shadow(0 0 46px rgba(var(--accent-rgb), 0.3));
+      }
+
+      /* LED mouthpiece dot + lens-flare bloom */
+      .led-tip {
+        position: absolute;
+        left: var(--tip-x);
+        top: var(--tip-y);
+        width: 10px;
+        height: 10px;
+        transform: translate(-50%, -50%);
+        pointer-events: none;
+        z-index: 4;
+        will-change: transform, opacity;
+        opacity: 0.55;
+      }
+
+      .led-core {
+        position: absolute;
+        inset: 2px;
+        border-radius: 50%;
+        background: radial-gradient(
+          circle,
+          #ffffff 0%,
+          rgba(var(--accent-rgb), 0.95) 55%,
+          rgba(var(--accent-rgb), 0) 100%
+        );
+        box-shadow: 0 0 10px 2px rgba(var(--accent-rgb), 0.75);
+      }
+
+      .led-flare {
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        width: 44px;
+        height: 44px;
+        transform: translate(-50%, -50%);
+        border-radius: 50%;
+        background: radial-gradient(
+          circle,
+          rgba(255, 255, 255, 0.85) 0%,
+          rgba(var(--accent-rgb), 0.55) 22%,
+          rgba(var(--accent-rgb), 0.14) 48%,
+          rgba(var(--accent-rgb), 0) 72%
+        );
+      }
+
+      .led-streak {
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        width: 58px;
+        height: 3px;
+        transform: translate(-50%, -50%);
+        border-radius: 999px;
+        background: radial-gradient(
+          ellipse at center,
+          rgba(255, 255, 255, 0.9) 0%,
+          rgba(var(--accent-rgb), 0.55) 38%,
+          rgba(var(--accent-rgb), 0) 75%
+        );
+        opacity: 0.35;
+      }
+
+      /* Reactive floor shadow hovering beneath the device */
+      .floor-shadow {
+        width: 136px;
+        height: 22px;
+        margin-top: 26px;
+        border-radius: 50%;
+        pointer-events: none;
+        will-change: transform, opacity, filter;
+        background: radial-gradient(
+          ellipse at center,
+          rgba(0, 0, 0, 0.44) 0%,
+          rgba(var(--accent-rgb), 0.14) 48%,
+          rgba(0, 0, 0, 0) 74%
+        );
+        filter: blur(8px);
+        opacity: 0.72;
+      }
+
+      body.dark .floor-shadow {
+        background: radial-gradient(
+          ellipse at center,
+          rgba(var(--accent-rgb), 0.36) 0%,
+          rgba(var(--accent-rgb), 0.12) 48%,
+          rgba(0, 0, 0, 0) 74%
+        );
+        filter: blur(11px);
+        opacity: 0.55;
+      }
+
+      /* Thin glowing charge line under the vape */
+      .charge-track {
+        width: 120px;
+        height: 2px;
+        margin-top: 20px;
+        border-radius: 999px;
+        background-color: var(--line);
+        overflow: visible;
+        opacity: 0;
+        transition: opacity 180ms ease;
+        pointer-events: none;
+      }
+
+      .charge-track.is-active {
+        opacity: 1;
+      }
+
+      .charge-fill {
+        width: 100%;
+        height: 100%;
+        border-radius: 999px;
+        transform-origin: left center;
+        transform: scaleX(0);
+        background-color: var(--accent);
+        box-shadow: 0 0 10px rgba(var(--accent-rgb), 0.75),
+          0 0 22px rgba(var(--accent-rgb), 0.45);
+        will-change: transform;
+      }
+
+      /* Subtle lowercase captions & initial hint */
+      .caption-slot {
+        min-height: 24px;
+        margin-top: 14px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        pointer-events: none;
+        padding: 0 24px;
+        text-align: center;
+      }
+
+      .caption-text {
+        font-size: 13px;
+        font-weight: 400;
+        letter-spacing: 0.02em;
+        color: var(--muted);
+        opacity: 0;
+        transform: translateY(4px);
+        transition: opacity 260ms cubic-bezier(0.16, 1, 0.3, 1),
+          transform 260ms cubic-bezier(0.16, 1, 0.3, 1),
+          color 240ms ease;
+      }
+
+      .caption-text.is-visible {
+        opacity: 1;
+        transform: translateY(0);
+      }
+
+      .caption-text.is-warning {
+        color: var(--accent);
+        font-weight: 500;
+      }
+
+      /* =======================================================================
+         5. BOTTOM DESIGN SWITCHER
+         ======================================================================= */
+      .switcher {
+        position: fixed;
+        bottom: max(16px, env(safe-area-inset-bottom));
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 30;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 8px;
+      }
+
+      .nav-arrow {
+        appearance: none;
+        background: transparent;
+        border: none;
+        color: var(--muted);
+        min-width: 44px;
+        min-height: 44px;
+        border-radius: 999px;
+        font-size: 16px;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        transition: color 180ms ease, transform 140ms ease,
+          background-color 180ms ease;
+      }
+
+      .nav-arrow:hover {
+        color: var(--fg);
+        background-color: rgba(128, 128, 128, 0.08);
+      }
+
+      .nav-arrow:active {
+        transform: scale(0.92);
+      }
+
+      .nav-arrow:focus-visible {
+        outline: 2px solid rgba(var(--accent-rgb), 0.8);
+        outline-offset: 2px;
+      }
+
+      .dots {
+        display: flex;
+        align-items: center;
+        gap: 2px;
+      }
+
+      .dot-btn {
+        appearance: none;
+        background: transparent;
+        border: none;
+        min-width: 32px;
+        min-height: 44px;
+        padding: 0;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .dot-btn:focus-visible {
+        outline: 2px solid rgba(var(--accent-rgb), 0.8);
+        border-radius: 8px;
+      }
+
+      .dot-pip {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background-color: var(--muted);
+        opacity: 0.35;
+        transition: transform 220ms cubic-bezier(0.16, 1, 0.3, 1),
+          opacity 220ms ease, background-color 260ms ease,
+          box-shadow 260ms ease;
+      }
+
+      .dot-btn:hover .dot-pip {
+        opacity: 0.72;
+      }
+
+      .dot-btn[aria-selected="true"] .dot-pip {
+        opacity: 1;
+        transform: scale(1.35);
+        background-color: var(--accent);
+        box-shadow: 0 0 8px rgba(var(--accent-rgb), 0.65);
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .caption-text,
+        .vape-float,
+        .dot-pip {
+          transition-duration: 0.01ms !important;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="app" id="app" data-state="idle">
+      <!-- Top minimal bar: counter + sound/theme toggles -->
+      <header class="top-bar">
+        <div class="puff-counter" aria-live="polite">
+          puffs: <strong id="puff-count">0</strong>
+        </div>
+        <div class="top-actions">
+          <button
+            type="button"
+            class="ui-btn"
+            id="smoke-mode-toggle"
+            aria-label="toggle smoke mode"
+          >
+            smoke: puff
+          </button>
+          <button
+            type="button"
+            class="ui-btn"
+            id="sound-toggle"
+            aria-pressed="false"
+            aria-label="toggle sound"
+          >
+            sound: off
+          </button>
+          <button
+            type="button"
+            class="ui-btn"
+            id="theme-toggle"
+            aria-pressed="false"
+            aria-label="toggle dark mode"
+          >
+            dark
+          </button>
+        </div>
+      </header>
+
+      <!-- Main interactive vape stage -->
+      <section
+        class="stage"
+        id="stage"
+        role="button"
+        tabindex="0"
+        aria-label="hold to inhale, release to exhale"
+      >
+        <div class="vape-rig" id="vape-rig">
+          <div class="ambient-glow" id="ambient-glow" aria-hidden="true"></div>
+          <div class="vape-halo" id="vape-halo" aria-hidden="true"></div>
+
+          <div class="vape-float" id="vape-float">
+            <div class="vape-body" id="vape-body">
+              <img
+                id="vape-img"
+                class="vape-img"
+                alt="virtual vape device"
+                draggable="false"
+              />
+              <div class="led-tip" id="led-tip" aria-hidden="true">
+                <div class="led-flare"></div>
+                <div class="led-streak" id="led-streak"></div>
+                <div class="led-core"></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="floor-shadow" id="floor-shadow" aria-hidden="true"></div>
+
+          <div class="charge-track" id="charge-track" aria-hidden="true">
+            <div class="charge-fill" id="charge-fill"></div>
+          </div>
+
+          <div class="caption-slot">
+            <span class="caption-text is-visible" id="caption-text">
+              hold to inhale
+            </span>
+          </div>
+        </div>
+      </section>
+
+      <!-- Bottom minimal design switcher -->
+      <nav class="switcher" aria-label="vape designs">
+        <button
+          type="button"
+          class="nav-arrow"
+          id="prev-design"
+          aria-label="previous vape design"
+        >
+          &#8249;
+        </button>
+        <div class="dots" id="design-dots" role="tablist"></div>
+        <button
+          type="button"
+          class="nav-arrow"
+          id="next-design"
+          aria-label="next vape design"
+        >
+          &#8250;
+        </button>
+      </nav>
+
+      <!-- Full-viewport smoke particle layer -->
+      <canvas id="smoke-canvas" data-testid="smoke-canvas"></canvas>
+    </main>
+
+    <script>
+      (() => {
+        "use strict";
+
+        /* =====================================================================
+           VAPE DESIGNS CONFIG
+           ---------------------------------------------------------------------
+           Add more designs here! Required fields:
+             { image: "path/to/file.png", accent: "#ff4fa3", tipX: 0.5, tipY: 0.02 }
+           Optional fields:
+             name: label for screen readers
+             crop: [sx, sy, sw, sh] in source pixels (for multi-item sheets)
+             cutout: color tolerance (0-80) to auto-remove solid backgrounds
+           ===================================================================== */
+        const DESIGNS = [
+          {
+            name: "berry iridescent pod",
+            image: "/assets/aistudio/image_d915cfa9.png",
+            accent: "#ff4fa3",
+            tipX: 0.5,
+            tipY: 0.03,
+            crop: [330, 68, 172, 696],
+            cutout: 28,
+          },
+          {
+            name: "ice blue disposable",
+            image: "/assets/aistudio/image_ca89e48a.png",
+            accent: "#38bdf8",
+            tipX: 0.33,
+            tipY: 0.025,
+            crop: [194, 172, 244, 456],
+            cutout: 28,
+          },
+          {
+            name: "amber boost pod",
+            image: "/assets/aistudio/image_302149a3.png",
+            accent: "#ff7a1a",
+            tipX: 0.034,
+            tipY: 0.082,
+            tipAngle: -0.42,
+            crop: [9, 19, 677, 463],
+            cutout: 22,
+          },
+          {
+            name: "airpen mint stick",
+            image: "/assets/aistudio/image_f8ca18fe.png",
+            accent: "#34d399",
+            tipX: 0.5,
+            tipY: 0.02,
+            crop: [164, 20, 79, 511],
+            cutout: 26,
+          },
+        ];
+
+        const CAPTIONS = [
+          "bro.",
+          "that was a big one",
+          "refill your juice",
+          "lung capacity: questionable",
+          "your juice is running out btw",
+          "touch grass",
+          "0% nic, 100% delusion",
+          "cotton is screaming rn",
+          "blinked it",
+          "digital clouds only",
+        ];
+
+        const MAX_HOLD_MS = 4000;
+        const MAX_PARTICLES = 160;
+        const MAX_TILT_Z = 75; // hard upright limit in degrees (never upside down)
+        const MAX_TILT_X = 22;
+        const MAX_TILT_Y = 28;
+        const SMOKE_MODES = ["puff", "rings", "spiral"];
+
+        /* =====================================================================
+           DOM REFERENCES
+           ===================================================================== */
+        const rootEl = document.documentElement;
+        const appEl = document.getElementById("app");
+        const stageEl = document.getElementById("stage");
+        const vapeFloatEl = document.getElementById("vape-float");
+        const vapeBodyEl = document.getElementById("vape-body");
+        const vapeImgEl = document.getElementById("vape-img");
+        const ambientGlowEl = document.getElementById("ambient-glow");
+        const vapeHaloEl = document.getElementById("vape-halo");
+        const floorShadowEl = document.getElementById("floor-shadow");
+        const ledTipEl = document.getElementById("led-tip");
+        const ledStreakEl = document.getElementById("led-streak");
+        const chargeTrackEl = document.getElementById("charge-track");
+        const chargeFillEl = document.getElementById("charge-fill");
+        const puffCountEl = document.getElementById("puff-count");
+        const captionTextEl = document.getElementById("caption-text");
+        const smokeModeToggleEl = document.getElementById("smoke-mode-toggle");
+        const soundToggleEl = document.getElementById("sound-toggle");
+        const themeToggleEl = document.getElementById("theme-toggle");
+        const prevBtnEl = document.getElementById("prev-design");
+        const nextBtnEl = document.getElementById("next-design");
+        const dotsWrapEl = document.getElementById("design-dots");
+        const canvas = document.getElementById("smoke-canvas");
+        const ctx = canvas.getContext("2d");
+
+        /* =====================================================================
+           STATE
+           ===================================================================== */
+        let currentIndex = 0;
+        let darkMode = false;
+        let soundEnabled = false;
+        let smokeModeIndex = 0;
+        let smokeMode = SMOKE_MODES[0];
+        let puffs = 0;
+        let isHolding = false;
+        let holdStartTime = 0;
+        let holdCharge = 0; // 0..1
+        let maxHoldTriggered = false;
+        let releaseFlash = 0; // 0..1 pulse on exhale
+        let lowJuiceActive = false;
+        let lowJuiceUntil = 0;
+        let lastCaptionIdx = -1;
+        let captionTimeout = null;
+        let switchSlideOffset = 0;
+        let hasPuffedOnce = false;
+
+        // Smoothly interpolated accent RGB for buttery transitions between designs
+        let currentRgb = hexToRgb(DESIGNS[0].accent);
+        let targetRgb = { ...currentRgb };
+
+        // Interactive rotation state (clamped so it can never go upside down)
+        let rotZ = 0;
+        let targetRotZ = 0;
+        let tiltX = 0;
+        let targetTiltX = 0;
+        let tiltY = 0;
+        let targetTiltY = 0;
+        let isDraggingRotate = false;
+        let lastDragX = 0;
+        let lastDragY = 0;
+        let lastPolarAngle = 0;
+        let startedOnVape = false;
+        let limitWarningShownAt = 0;
+
+        // Touch / swipe tracking
+        let activePointerId = null;
+        let pointerStartX = 0;
+        let pointerStartY = 0;
+        let pointerStartAt = 0;
+        let swipeConsumed = false;
+
+        // Smoke particles & pre-rendered soft blur sprites
+        const particles = [];
+        const pendingEmissions = [];
+        let canvasW = 0;
+        let canvasH = 0;
+        let dpr = 1;
+        let neutralSprite = null;
+        let accentSprite = null;
+        let lastAccentSpriteHex = "";
+        let lastSpriteDark = null;
+
+        // Cache processed transparent PNG data URLs per design index
+        const processedUrls = new Map();
+
+        /* =====================================================================
+           COLOR & IMAGE CUTOUT HELPERS
+           ===================================================================== */
+        function hexToRgb(hex) {
+          const clean = hex.replace("#", "").trim();
+          const full =
+            clean.length === 3
+              ? clean
+                  .split("")
+                  .map((c) => c + c)
+                  .join("")
+              : clean;
+          const n = parseInt(full, 16);
+          return {
+            r: (n >> 16) & 255,
+            g: (n >> 8) & 255,
+            b: n & 255,
+          };
+        }
+
+        function rgbString(rgb) {
+          return `${Math.round(rgb.r)}, ${Math.round(rgb.g)}, ${Math.round(
+            rgb.b
+          )}`;
+        }
+
+        /**
+         * Loads a design image, optionally crops it, and flood-fills away solid
+         * backgrounds from the edges so any vape photo/illustration floats cleanly
+         * on both white and black themes. Falls back gracefully if tainted.
+         */
+        function prepareDesignImage(design, index) {
+          if (processedUrls.has(index)) {
+            return Promise.resolve(processedUrls.get(index));
+          }
+          return new Promise((resolve) => {
+            const img = new Image();
+            img.onload = () => {
+              try {
+                const [sx, sy, sw, sh] = design.crop || [
+                  0,
+                  0,
+                  img.naturalWidth,
+                  img.naturalHeight,
+                ];
+                // Upscale tiny crops slightly with smooth interpolation for crisp display
+                const scaleUp = sh < 220 ? 3 : 1;
+                const pad = 2;
+                const workW = sw + pad * 2;
+                const workH = sh + pad * 2;
+
+                const off = document.createElement("canvas");
+                off.width = workW;
+                off.height = workH;
+                const octx = off.getContext("2d", { willReadFrequently: true });
+                octx.clearRect(0, 0, workW, workH);
+                octx.drawImage(img, sx, sy, sw, sh, pad, pad, sw, sh);
+
+                const imgData = octx.getImageData(0, 0, workW, workH);
+                const data = imgData.data;
+
+                // Sample a background color inside the cropped edges
+                const sampleIdx = (pad * workW + pad) * 4;
+                const bgR = data[sampleIdx];
+                const bgG = data[sampleIdx + 1];
+                const bgB = data[sampleIdx + 2];
+                const bgA = data[sampleIdx + 3];
+
+                const isNearWhite =
+                  bgA > 200 && bgR > 236 && bgG > 236 && bgB > 236;
+                const tol =
+                  typeof design.cutout === "number"
+                    ? design.cutout
+                    : isNearWhite
+                    ? 26
+                    : 0;
+
+                if (tol > 0 && bgA > 30) {
+                  const visited = new Uint8Array(workW * workH);
+                  const cleared = new Uint8Array(workW * workH);
+                  const queue = new Int32Array(workW * workH);
+                  let head = 0;
+                  let tail = 0;
+
+                  const push = (idx) => {
+                    if (!visited[idx]) {
+                      visited[idx] = 1;
+                      queue[tail++] = idx;
+                    }
+                  };
+
+                  for (let x = 0; x < workW; x++) {
+                    push(x);
+                    push((workH - 1) * workW + x);
+                  }
+                  for (let y = 0; y < workH; y++) {
+                    push(y * workW);
+                    push(y * workW + (workW - 1));
+                  }
+
+                  const tolSq = tol * tol * 3;
+                  while (head < tail) {
+                    const idx = queue[head++];
+                    const p = idx * 4;
+                    const a = data[p + 3];
+                    const dr = data[p] - bgR;
+                    const dg = data[p + 1] - bgG;
+                    const db = data[p + 2] - bgB;
+                    const distSq = dr * dr + dg * dg + db * db;
+
+                    if (a < 25 || distSq <= tolSq) {
+                      data[p + 3] = 0;
+                      cleared[idx] = 1;
+                      const x = idx % workW;
+                      const y = (idx - x) / workW;
+                      if (x > 0) push(idx - 1);
+                      if (x < workW - 1) push(idx + 1);
+                      if (y > 0) push(idx - workW);
+                      if (y < workH - 1) push(idx + workW);
+                    }
+                  }
+
+                  // Soften 1px fringe adjacent to cleared background
+                  const softTolSq = tolSq * 2.4;
+                  for (let y = 1; y < workH - 1; y++) {
+                    for (let x = 1; x < workW - 1; x++) {
+                      const idx = y * workW + x;
+                      if (cleared[idx]) continue;
+                      if (
+                        cleared[idx - 1] ||
+                        cleared[idx + 1] ||
+                        cleared[idx - workW] ||
+                        cleared[idx + workW]
+                      ) {
+                        const p = idx * 4;
+                        const dr = data[p] - bgR;
+                        const dg = data[p + 1] - bgG;
+                        const db = data[p + 2] - bgB;
+                        const distSq = dr * dr + dg * dg + db * db;
+                        if (distSq < softTolSq) {
+                          const t = Math.min(
+                            1,
+                            Math.max(0.25, (distSq - tolSq * 0.5) / softTolSq)
+                          );
+                          data[p + 3] = Math.round(data[p + 3] * t);
+                        }
+                      }
+                    }
+                  }
+                  octx.putImageData(imgData, 0, 0);
+                }
+
+                // Crop back out without the 2px padding
+                const outCanvas = document.createElement("canvas");
+                outCanvas.width = sw * scaleUp;
+                outCanvas.height = sh * scaleUp;
+                const outCtx = outCanvas.getContext("2d");
+                outCtx.imageSmoothingEnabled = true;
+                outCtx.imageSmoothingQuality = "high";
+                outCtx.drawImage(
+                  off,
+                  pad,
+                  pad,
+                  sw,
+                  sh,
+                  0,
+                  0,
+                  outCanvas.width,
+                  outCanvas.height
+                );
+
+                const dataUrl = outCanvas.toDataURL("image/png");
+                processedUrls.set(index, dataUrl);
+                resolve(dataUrl);
+              } catch {
+                // Fallback if canvas pixel read is blocked on file://
+                processedUrls.set(index, design.image);
+                resolve(design.image);
+              }
+            };
+            img.onerror = () => resolve(design.image);
+            img.src = design.image;
+          });
+        }
+
+        /* =====================================================================
+           WEB AUDIO API (FILTERED NOISE INHALE & EXHALE, NO EXTERNAL FILES)
+           ===================================================================== */
+        let audioCtx = null;
+        let inhaleSource = null;
+        let inhaleFilter = null;
+        let inhaleGain = null;
+
+        function ensureAudio() {
+          if (!audioCtx) {
+            const Ctx = window.AudioContext || window.webkitAudioContext;
+            if (!Ctx) return null;
+            audioCtx = new Ctx();
+          }
+          if (audioCtx.state === "suspended") {
+            audioCtx.resume().catch(() => {});
+          }
+          return audioCtx;
+        }
+
+        function createNoiseBuffer(ctxRef, seconds) {
+          const length = Math.floor(ctxRef.sampleRate * seconds);
+          const buffer = ctxRef.createBuffer(1, length, ctxRef.sampleRate);
+          const channel = buffer.getChannelData(0);
+          let last = 0;
+          for (let i = 0; i < length; i++) {
+            const white = Math.random() * 2 - 1;
+            last = (last + 0.08 * white) / 1.08;
+            channel[i] = white * 0.55 + last * 1.4;
+          }
+          return buffer;
+        }
+
+        function startInhaleSound() {
+          if (!soundEnabled) return;
+          const ctxRef = ensureAudio();
+          if (!ctxRef) return;
+          stopInhaleSound();
+
+          const src = ctxRef.createBufferSource();
+          src.buffer = createNoiseBuffer(ctxRef, 2.5);
+          src.loop = true;
+
+          const hp = ctxRef.createBiquadFilter();
+          hp.type = "highpass";
+          hp.frequency.value = 950;
+
+          const bp = ctxRef.createBiquadFilter();
+          bp.type = "bandpass";
+          bp.frequency.setValueAtTime(1900, ctxRef.currentTime);
+          bp.frequency.linearRampToValueAtTime(3200, ctxRef.currentTime + 3.5);
+          bp.Q.value = 1.6;
+
+          const gain = ctxRef.createGain();
+          gain.gain.setValueAtTime(0.001, ctxRef.currentTime);
+          gain.gain.linearRampToValueAtTime(0.055, ctxRef.currentTime + 0.14);
+
+          src.connect(hp);
+          hp.connect(bp);
+          bp.connect(gain);
+          gain.connect(ctxRef.destination);
+          src.start();
+
+          inhaleSource = src;
+          inhaleFilter = bp;
+          inhaleGain = gain;
+        }
+
+        function stopInhaleSound() {
+          if (!audioCtx || !inhaleSource || !inhaleGain) return;
+          const now = audioCtx.currentTime;
+          try {
+            inhaleGain.gain.cancelScheduledValues(now);
+            inhaleGain.gain.setValueAtTime(inhaleGain.gain.value, now);
+            inhaleGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.07);
+            const srcToStop = inhaleSource;
+            setTimeout(() => {
+              try {
+                srcToStop.stop();
+                srcToStop.disconnect();
+              } catch {}
+            }, 90);
+          } catch {}
+          inhaleSource = null;
+          inhaleFilter = null;
+          inhaleGain = null;
+        }
+
+        function playExhaleSound(charge) {
+          if (!soundEnabled) return;
+          const ctxRef = ensureAudio();
+          if (!ctxRef) return;
+
+          const duration = 0.55 + charge * 1.15;
+          const now = ctxRef.currentTime;
+
+          const src = ctxRef.createBufferSource();
+          src.buffer = createNoiseBuffer(ctxRef, duration + 0.2);
+
+          const lp = ctxRef.createBiquadFilter();
+          lp.type = "lowpass";
+          lp.frequency.setValueAtTime(1350 + charge * 450, now);
+          lp.frequency.exponentialRampToValueAtTime(220, now + duration);
+          lp.Q.value = 0.8;
+
+          const gain = ctxRef.createGain();
+          const peak = 0.04 + charge * 0.09;
+          gain.gain.setValueAtTime(0.001, now);
+          gain.gain.linearRampToValueAtTime(peak, now + 0.07);
+          gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+
+          src.connect(lp);
+          lp.connect(gain);
+          gain.connect(ctxRef.destination);
+          src.start(now);
+          src.stop(now + duration + 0.05);
+        }
+
+        function vibrate(pattern) {
+          if (typeof navigator === "undefined" || !navigator.vibrate) return;
+          if (
+            navigator.userActivation &&
+            !navigator.userActivation.hasBeenActive
+          ) {
+            return;
+          }
+          try {
+            navigator.vibrate(pattern);
+          } catch {}
+        }
+
+        /* =====================================================================
+           SMOKE SPRITES & PARTICLE SYSTEM
+           ===================================================================== */
+        function buildSmokeSprite(r, g, b, maxAlpha) {
+          const size = 128;
+          const c = document.createElement("canvas");
+          c.width = size;
+          c.height = size;
+          const gctx = c.getContext("2d");
+          const half = size / 2;
+          const grad = gctx.createRadialGradient(half, half, 2, half, half, half);
+          grad.addColorStop(0, `rgba(${r}, ${g}, ${b}, ${maxAlpha})`);
+          grad.addColorStop(0.4, `rgba(${r}, ${g}, ${b}, ${maxAlpha * 0.52})`);
+          grad.addColorStop(0.75, `rgba(${r}, ${g}, ${b}, ${maxAlpha * 0.14})`);
+          grad.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0)`);
+          gctx.fillStyle = grad;
+          gctx.fillRect(0, 0, size, size);
+          return c;
+        }
+
+        function syncSmokeSprites() {
+          const hex = DESIGNS[currentIndex].accent;
+          if (lastSpriteDark !== darkMode || !neutralSprite) {
+            // Light gray on white (#ffffff), crisp light gray/white on black (#000000)
+            neutralSprite = darkMode
+              ? buildSmokeSprite(240, 244, 250, 0.56)
+              : buildSmokeSprite(148, 156, 170, 0.48);
+            lastSpriteDark = darkMode;
+          }
+          if (lastAccentSpriteHex !== hex || !accentSprite) {
+            const rgb = hexToRgb(hex);
+            accentSprite = buildSmokeSprite(rgb.r, rgb.g, rgb.b, 0.56);
+            lastAccentSpriteHex = hex;
+          }
+        }
+
+        function resizeCanvas() {
+          dpr = Math.min(window.devicePixelRatio || 1, 2);
+          canvasW = window.innerWidth;
+          canvasH = window.innerHeight;
+          canvas.width = Math.floor(canvasW * dpr);
+          canvas.height = Math.floor(canvasH * dpr);
+          ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        }
+
+        function getTipPosition() {
+          const rect = ledTipEl.getBoundingClientRect();
+          if (rect.width === 0 && rect.height === 0) {
+            return { x: canvasW * 0.5, y: canvasH * 0.38 };
+          }
+          return {
+            x: rect.left + rect.width * 0.5,
+            y: rect.top + rect.height * 0.5,
+          };
+        }
+
+        function queueSmokeCloud(charge, mode = smokeMode) {
+          const clamped = Math.max(0.08, Math.min(1, charge));
+          const now = performance.now();
+
+          if (mode === "rings") {
+            const ringCount = clamped >= 0.72 ? 3 : clamped >= 0.34 ? 2 : 1;
+            const pointsPerRing = Math.round(22 + clamped * 10);
+            const ringTimes = [];
+            for (let r = 0; r < ringCount; r++) {
+              ringTimes.push(now + r * 240);
+            }
+            pendingEmissions.push({
+              mode: "rings",
+              ringTimes,
+              pointsPerRing,
+              charge: clamped,
+            });
+            return;
+          }
+
+          if (mode === "spiral") {
+            const totalCount = Math.round(28 + Math.pow(clamped, 1.15) * 86);
+            const streamDuration = 260 + clamped * 440;
+            pendingEmissions.push({
+              mode: "spiral",
+              startTime: now,
+              endTime: now + streamDuration,
+              remaining: totalCount,
+              total: totalCount,
+              emitted: 0,
+              charge: clamped,
+            });
+            return;
+          }
+
+          const totalCount = Math.round(14 + Math.pow(clamped, 1.25) * 116);
+          const streamDuration = 120 + clamped * 340;
+          pendingEmissions.push({
+            mode: "puff",
+            startTime: now,
+            endTime: now + streamDuration,
+            remaining: totalCount,
+            total: totalCount,
+            emitted: 0,
+            charge: clamped,
+          });
+        }
+
+        function spawnParticle(tip, charge, mode = "puff", meta = null) {
+          if (particles.length >= MAX_PARTICLES) {
+            particles.shift();
+          }
+          const tiltRad = (rotZ * Math.PI) / 180;
+          const baseDir =
+            -Math.PI / 2 + tiltRad * 0.65 + (DESIGNS[currentIndex].tipAngle || 0);
+
+          if (mode === "rings") {
+            const index = meta ? meta.index : 0;
+            const total = meta ? meta.total : 24;
+            const theta = (index / total) * Math.PI * 2;
+            const expandSpeed = 1.05 + charge * 1.15;
+            const driftSpeed = 2.0 + charge * 1.45;
+            const rx = Math.cos(theta);
+            const ry = Math.sin(theta) * 0.42;
+
+            particles.push({
+              mode: "rings",
+              x: tip.x + rx * 6,
+              y: tip.y + ry * 4,
+              vx: Math.cos(baseDir) * driftSpeed + rx * expandSpeed,
+              vy: Math.sin(baseDir) * driftSpeed + ry * expandSpeed,
+              ringExpandX: rx * 0.032 * (0.75 + charge * 0.7),
+              ringExpandY: ry * 0.032 * (0.75 + charge * 0.7),
+              size: 20 + charge * 16,
+              growth: 0.2 + charge * 0.24,
+              age: 0,
+              life: 2100 + charge * 1500,
+              alpha: 0.48 + charge * 0.28,
+              swirlFreq: 0.0012,
+              swirlAmp: 0.04,
+              phase: theta,
+            });
+            return;
+          }
+
+          if (mode === "spiral") {
+            const index = meta ? meta.index : 0;
+            const theta = index * 0.46;
+            const driftSpeed = 1.65 + charge * 1.5;
+            const radial = 0.65 + charge * 0.85;
+
+            particles.push({
+              mode: "spiral",
+              x: tip.x + Math.cos(theta) * 4,
+              y: tip.y + Math.sin(theta) * 2,
+              vx: Math.cos(baseDir) * driftSpeed + Math.cos(theta) * radial,
+              vy: Math.sin(baseDir) * driftSpeed + Math.sin(theta) * radial * 0.25,
+              helixAngle: theta,
+              helixSpin: 0.095 + charge * 0.03,
+              helixAmp: 0.65 + charge * 0.85,
+              size: (24 + Math.random() * 14) * (0.7 + charge * 0.85),
+              growth: (0.32 + Math.random() * 0.28) * (0.8 + charge * 0.75),
+              age: 0,
+              life: 2100 + Math.random() * 900 + charge * 1500,
+              alpha: (0.52 + Math.random() * 0.24) * (0.75 + charge * 0.35),
+              swirlFreq: 0.0015,
+              swirlAmp: 0.12,
+              phase: theta,
+            });
+            return;
+          }
+
+          const angle = baseDir + (Math.random() - 0.5) * (0.7 + charge * 0.78);
+          const speed = (0.95 + Math.random() * 1.9) * (0.65 + charge * 1.15);
+          const baseSize = (36 + Math.random() * 34) * (0.58 + charge * 1.38);
+
+          particles.push({
+            mode: "puff",
+            x: tip.x + (Math.random() - 0.5) * 10,
+            y: tip.y + (Math.random() - 0.5) * 6,
+            vx: Math.cos(angle) * speed,
+            vy: Math.sin(angle) * speed - (0.5 + charge * 0.9),
+            size: baseSize,
+            growth: (0.65 + Math.random() * 0.85) * (0.75 + charge * 1.3),
+            age: 0,
+            life: 1900 + Math.random() * 1600 + charge * 1900,
+            alpha: (0.5 + Math.random() * 0.3) * (0.72 + charge * 0.42),
+            swirlFreq: 0.0018 + Math.random() * 0.0022,
+            swirlAmp: 0.25 + Math.random() * 0.48,
+            phase: Math.random() * Math.PI * 2,
+          });
+        }
+
+        /* =====================================================================
+           CAPTION, PUFF COUNTER & LOW JUICE LOGIC
+           ===================================================================== */
+        function showCaption(text, isWarning = false, duration = 2600) {
+          clearTimeout(captionTimeout);
+          captionTextEl.textContent = text;
+          captionTextEl.classList.toggle("is-warning", isWarning);
+          captionTextEl.classList.remove("is-visible");
+          requestAnimationFrame(() => {
+            captionTextEl.classList.add("is-visible");
+          });
+          if (duration > 0) {
+            captionTimeout = setTimeout(() => {
+              captionTextEl.classList.remove("is-visible");
+            }, duration);
+          }
+        }
+
+        function nextRandomCaption() {
+          let idx;
+          do {
+            idx = Math.floor(Math.random() * CAPTIONS.length);
+          } while (idx === lastCaptionIdx && CAPTIONS.length > 1);
+          lastCaptionIdx = idx;
+          return CAPTIONS[idx];
+        }
+
+        /* =====================================================================
+           DESIGN SWITCHING
+           ===================================================================== */
+        function renderDots() {
+          dotsWrapEl.innerHTML = "";
+          DESIGNS.forEach((d, i) => {
+            const btn = document.createElement("button");
+            btn.type = "button";
+            btn.className = "dot-btn";
+            btn.setAttribute("role", "tab");
+            btn.setAttribute("aria-label", `select ${d.name || `design ${i + 1}`}`);
+            btn.setAttribute("aria-selected", i === currentIndex ? "true" : "false");
+
+            const pip = document.createElement("span");
+            pip.className = "dot-pip";
+            btn.appendChild(pip);
+
+            btn.addEventListener("click", () => {
+              btn.blur();
+              selectDesign(i);
+            });
+            dotsWrapEl.appendChild(btn);
+          });
+        }
+
+        function updateDotsActive() {
+          const btns = dotsWrapEl.querySelectorAll(".dot-btn");
+          btns.forEach((b, i) => {
+            b.setAttribute("aria-selected", i === currentIndex ? "true" : "false");
+          });
+        }
+
+        function selectDesign(nextIdx, direction = 0, silent = false) {
+          const total = DESIGNS.length;
+          const targetIdx = ((nextIdx % total) + total) % total;
+          if (targetIdx === currentIndex && vapeImgEl.src) return;
+
+          const dir =
+            direction !== 0 ? direction : targetIdx > currentIndex ? 1 : -1;
+          currentIndex = targetIdx;
+          const design = DESIGNS[currentIndex];
+
+          targetRgb = hexToRgb(design.accent);
+          rootEl.style.setProperty("--accent", design.accent);
+          rootEl.style.setProperty("--tip-x", `${(design.tipX ?? 0.5) * 100}%`);
+          rootEl.style.setProperty("--tip-y", `${(design.tipY ?? 0.02) * 100}%`);
+          syncSmokeSprites();
+          updateDotsActive();
+          if (!silent) vibrate(14);
+
+          // Reset rotation gently when swapping designs
+          targetRotZ = 0;
+          targetTiltX = 0;
+          targetTiltY = 0;
+
+          // Quick fade + slide transition
+          vapeFloatEl.classList.add("is-switching-out");
+          switchSlideOffset = -dir * 22;
+
+          prepareDesignImage(design, currentIndex).then((url) => {
+            // Only apply if user hasn't already switched again
+            if (DESIGNS[currentIndex] !== design) return;
+            vapeImgEl.src = url;
+            vapeImgEl.alt = design.name || `virtual vape ${currentIndex + 1}`;
+            switchSlideOffset = dir * 24;
+            requestAnimationFrame(() => {
+              vapeFloatEl.classList.remove("is-switching-out");
+            });
+          });
+        }
+
+        /* =====================================================================
+           INHALE / EXHALE INTERACTION
+           ===================================================================== */
+        function beginInhale() {
+          if (isHolding) return;
+          isHolding = true;
+          holdStartTime = performance.now();
+          holdCharge = 0;
+          maxHoldTriggered = false;
+          appEl.dataset.state = "inhaling";
+          chargeTrackEl.classList.add("is-active");
+          if (!hasPuffedOnce) {
+            captionTextEl.classList.remove("is-visible");
+          }
+          startInhaleSound();
+          vibrate(10);
+        }
+
+        function finishExhale(forcedMax = false) {
+          if (!isHolding) return;
+          isHolding = false;
+          appEl.dataset.state = "idle";
+          chargeTrackEl.classList.remove("is-active");
+          chargeFillEl.style.transform = "scaleX(0)";
+          stopInhaleSound();
+
+          const elapsed = performance.now() - holdStartTime;
+          const charge = forcedMax
+            ? 1
+            : Math.min(1, Math.max(0.08, elapsed / MAX_HOLD_MS));
+          holdCharge = 0;
+
+          // Bright release flash
+          releaseFlash = 0.75 + charge * 0.45;
+          hasPuffedOnce = true;
+
+          // Increment puffs & check 20-puff low-juice milestone
+          puffs += 1;
+          puffCountEl.textContent = String(puffs);
+          appEl.dataset.puffs = String(puffs);
+
+          queueSmokeCloud(charge);
+          playExhaleSound(charge);
+          vibrate(Math.round(18 + charge * 42));
+
+          if (puffs % 20 === 0) {
+            lowJuiceActive = true;
+            lowJuiceUntil = performance.now() + 7000;
+            showCaption("juice level: critically low", true, 6500);
+          } else {
+            lowJuiceActive = false;
+            if (forcedMax) {
+              showCaption("ok that's enough", false, 2800);
+            } else {
+              showCaption(nextRandomCaption(), false, 2500);
+            }
+          }
+        }
+
+        function cancelInhale() {
+          if (!isHolding) return;
+          isHolding = false;
+          holdCharge = 0;
+          appEl.dataset.state = "idle";
+          chargeTrackEl.classList.remove("is-active");
+          chargeFillEl.style.transform = "scaleX(0)";
+          stopInhaleSound();
+        }
+
+        /* =====================================================================
+           EVENT LISTENERS (POINTER, SWIPE, KEYBOARD, BUTTONS)
+           ===================================================================== */
+        function getVapeCenter() {
+          const rect = vapeBodyEl.getBoundingClientRect();
+          return {
+            x: rect.left + rect.width * 0.5,
+            y: rect.top + rect.height * 0.5,
+          };
+        }
+
+        function rubberClamp(val, max) {
+          if (Math.abs(val) <= max) return val;
+          const sign = Math.sign(val);
+          const over = Math.abs(val) - max;
+          // Soft asymptotic resistance past MAX_TILT_Z (caps around +9deg extra)
+          return sign * (max + 9 * (1 - Math.exp(-over / 18)));
+        }
+
+        stageEl.addEventListener("pointerdown", (e) => {
+          if (e.button !== 0 && e.pointerType === "mouse") return;
+          activePointerId = e.pointerId;
+          pointerStartX = e.clientX;
+          pointerStartY = e.clientY;
+          lastDragX = e.clientX;
+          lastDragY = e.clientY;
+          pointerStartAt = performance.now();
+          swipeConsumed = false;
+          isDraggingRotate = false;
+
+          const rect = vapeBodyEl.getBoundingClientRect();
+          const pad = 28;
+          startedOnVape =
+            e.clientX >= rect.left - pad &&
+            e.clientX <= rect.right + pad &&
+            e.clientY >= rect.top - pad &&
+            e.clientY <= rect.bottom + pad;
+
+          const center = getVapeCenter();
+          lastPolarAngle = Math.atan2(e.clientY - center.y, e.clientX - center.x);
+
+          try {
+            stageEl.setPointerCapture(e.pointerId);
+          } catch {}
+          beginInhale();
+        });
+
+        stageEl.addEventListener("pointermove", (e) => {
+          if (e.pointerId !== activePointerId || swipeConsumed) return;
+          const dxTotal = e.clientX - pointerStartX;
+          const dyTotal = e.clientY - pointerStartY;
+          const distTotal = Math.hypot(dxTotal, dyTotal);
+          const dt = performance.now() - pointerStartAt;
+
+          // Fast horizontal swipe outside the vape on touch swaps designs
+          if (
+            !isDraggingRotate &&
+            !startedOnVape &&
+            e.pointerType === "touch" &&
+            dt < 260 &&
+            Math.abs(dxTotal) > 64 &&
+            Math.abs(dxTotal) > Math.abs(dyTotal) * 1.8
+          ) {
+            swipeConsumed = true;
+            cancelInhale();
+            selectDesign(currentIndex + (dxTotal < 0 ? 1 : -1), dxTotal < 0 ? 1 : -1);
+            return;
+          }
+
+          // Deliberate drag (> 12px) switches into interactive rotation
+          if (!isDraggingRotate && distTotal > 12) {
+            isDraggingRotate = true;
+            cancelInhale();
+            appEl.dataset.state = "rotating";
+          }
+
+          if (isDraggingRotate) {
+            const dx = e.clientX - lastDragX;
+            const dy = e.clientY - lastDragY;
+            const center = getVapeCenter();
+            const currAngle = Math.atan2(
+              e.clientY - center.y,
+              e.clientX - center.x
+            );
+            let dAngle = currAngle - lastPolarAngle;
+            if (dAngle > Math.PI) dAngle -= Math.PI * 2;
+            if (dAngle < -Math.PI) dAngle += Math.PI * 2;
+            lastPolarAngle = currAngle;
+
+            // Combine natural horizontal drag with circular polar motion around the vape
+            const radius = Math.hypot(e.clientX - center.x, e.clientY - center.y);
+            const polarWeight = Math.min(1, Math.max(0, (radius - 30) / 90));
+            const linearDelta = dx * 0.36;
+            const polarDelta = ((dAngle * 180) / Math.PI) * 0.85;
+            const rawNextZ =
+              targetRotZ + linearDelta * (1 - polarWeight * 0.55) + polarDelta * polarWeight;
+
+            // Clamp with rubber-band resistance so it can never flip upside down
+            targetRotZ = rubberClamp(rawNextZ, MAX_TILT_Z);
+            targetTiltY = Math.max(
+              -MAX_TILT_Y,
+              Math.min(MAX_TILT_Y, targetTiltY + dx * 0.22)
+            );
+            targetTiltX = Math.max(
+              -MAX_TILT_X,
+              Math.min(MAX_TILT_X, targetTiltX - dy * 0.2)
+            );
+
+            if (Math.abs(rawNextZ) > MAX_TILT_Z + 1.5) {
+              const now = performance.now();
+              if (now - limitWarningShownAt > 3200) {
+                limitWarningShownAt = now;
+                showCaption("careful, juice'll spill", false, 1800);
+                vibrate(12);
+              }
+            }
+
+            lastDragX = e.clientX;
+            lastDragY = e.clientY;
+          }
+        });
+
+        const handlePointerEnd = (e) => {
+          if (e.pointerId !== activePointerId) return;
+          activePointerId = null;
+          if (isDraggingRotate) {
+            isDraggingRotate = false;
+            appEl.dataset.state = "idle";
+            // Snap any rubber-band overscroll cleanly back within ±MAX_TILT_Z
+            targetRotZ = Math.max(-MAX_TILT_Z, Math.min(MAX_TILT_Z, targetRotZ));
+            // Relax subtle 3D pitch/yaw slightly back toward neutral while keeping Z tilt
+            targetTiltX *= 0.35;
+            targetTiltY *= 0.45;
+            return;
+          }
+          if (!swipeConsumed && isHolding) {
+            finishExhale(false);
+          }
+        };
+
+        stageEl.addEventListener("pointerup", handlePointerEnd);
+        stageEl.addEventListener("pointercancel", (e) => {
+          if (e.pointerId === activePointerId) {
+            activePointerId = null;
+            isDraggingRotate = false;
+            targetRotZ = Math.max(-MAX_TILT_Z, Math.min(MAX_TILT_Z, targetRotZ));
+            cancelInhale();
+          }
+        });
+
+        // Double-click or double-tap stage to smoothly upright the vape
+        stageEl.addEventListener("dblclick", () => {
+          targetRotZ = 0;
+          targetTiltX = 0;
+          targetTiltY = 0;
+        });
+
+        // Prevent context menu & double-tap zoom on stage
+        appEl.addEventListener("contextmenu", (e) => e.preventDefault());
+
+        // Keyboard controls: Space to inhale/exhale, Left/Right arrows to swap designs
+        window.addEventListener("keydown", (e) => {
+          if (e.code === "Space") {
+            if (
+              e.target &&
+              e.target.tagName === "BUTTON" &&
+              e.target.matches(":focus-visible")
+            ) {
+              return;
+            }
+            e.preventDefault();
+            if (!e.repeat) beginInhale();
+          } else if (e.code === "ArrowLeft") {
+            e.preventDefault();
+            selectDesign(currentIndex - 1, -1);
+          } else if (e.code === "ArrowRight") {
+            e.preventDefault();
+            selectDesign(currentIndex + 1, 1);
+          }
+        });
+
+        window.addEventListener("keyup", (e) => {
+          if (e.code === "Space") {
+            if (isHolding) {
+              e.preventDefault();
+              finishExhale(false);
+            }
+          }
+        });
+
+        window.addEventListener("blur", cancelInhale);
+
+        // Smoke mode toggle (puff -> rings -> spiral)
+        smokeModeToggleEl.addEventListener("click", () => {
+          smokeModeToggleEl.blur();
+          smokeModeIndex = (smokeModeIndex + 1) % SMOKE_MODES.length;
+          smokeMode = SMOKE_MODES[smokeModeIndex];
+          smokeModeToggleEl.textContent = `smoke: ${smokeMode}`;
+          appEl.dataset.smokeMode = smokeMode;
+          vibrate(8);
+        });
+
+        // Theme toggle
+        themeToggleEl.addEventListener("click", () => {
+          themeToggleEl.blur();
+          darkMode = !darkMode;
+          document.body.classList.toggle("dark", darkMode);
+          themeToggleEl.textContent = darkMode ? "light" : "dark";
+          themeToggleEl.setAttribute("aria-pressed", String(darkMode));
+          syncSmokeSprites();
+          vibrate(8);
+        });
+
+        // Sound toggle
+        soundToggleEl.addEventListener("click", () => {
+          soundToggleEl.blur();
+          soundEnabled = !soundEnabled;
+          soundToggleEl.textContent = soundEnabled ? "sound: on" : "sound: off";
+          soundToggleEl.setAttribute("aria-pressed", String(soundEnabled));
+          if (soundEnabled) {
+            ensureAudio();
+          } else {
+            stopInhaleSound();
+          }
+          vibrate(8);
+        });
+
+        prevBtnEl.addEventListener("click", () => {
+          prevBtnEl.blur();
+          selectDesign(currentIndex - 1, -1);
+        });
+        nextBtnEl.addEventListener("click", () => {
+          nextBtnEl.blur();
+          selectDesign(currentIndex + 1, 1);
+        });
+
+        window.addEventListener("resize", resizeCanvas);
+
+        /* =====================================================================
+           MAIN ANIMATION LOOP (60FPS GPU TRANSFORMS + SMOKE CANVAS)
+           ===================================================================== */
+        let lastFrameTime = performance.now();
+
+        function tick(now) {
+          const dt = Math.min(50, now - lastFrameTime);
+          lastFrameTime = now;
+
+          // 1. Smoothly interpolate --accent-rgb across design transitions
+          const colorLerp = 1 - Math.exp(-0.012 * dt);
+          currentRgb.r += (targetRgb.r - currentRgb.r) * colorLerp;
+          currentRgb.g += (targetRgb.g - currentRgb.g) * colorLerp;
+          currentRgb.b += (targetRgb.b - currentRgb.b) * colorLerp;
+          rootEl.style.setProperty("--accent-rgb", rgbString(currentRgb));
+
+          // 2. Update inhale charge & auto-trigger max hold at 4 seconds
+          if (isHolding) {
+            const heldMs = now - holdStartTime;
+            holdCharge = Math.min(1, heldMs / MAX_HOLD_MS);
+            chargeFillEl.style.transform = `scaleX(${holdCharge})`;
+            if (heldMs >= MAX_HOLD_MS && !maxHoldTriggered) {
+              maxHoldTriggered = true;
+              finishExhale(true);
+            }
+          }
+
+          // 3. Decay exhale flash pulse
+          if (releaseFlash > 0) {
+            releaseFlash = Math.max(0, releaseFlash - dt * 0.0036);
+          }
+
+          // 4. Low-juice dying battery flicker (every 20 puffs for ~7 seconds)
+          let flicker = 1;
+          if (lowJuiceActive) {
+            if (now > lowJuiceUntil) {
+              lowJuiceActive = false;
+            } else {
+              // Erratic sputter pattern
+              const wave = Math.sin(now * 0.047) * Math.cos(now * 0.113);
+              flicker = wave > 0.18 ? 0.12 : wave < -0.55 ? 0.3 : 1.05;
+            }
+          }
+
+          // 5. Gentle sine-wave bobbing + subtle sway rotation
+          const bob = Math.sin(now * 0.0018); // -1 (top) .. +1 (bottom)
+          const sway = Math.sin(now * 0.0011) * 1.45; // deg
+          const breath = 0.5 + 0.5 * Math.sin(now * ((Math.PI * 2) / 4000));
+
+          // Damp slide transition & smooth interactive rotation
+          switchSlideOffset *= Math.exp(-0.014 * dt);
+          if (Math.abs(switchSlideOffset) < 0.1) switchSlideOffset = 0;
+
+          const rotLerp = 1 - Math.exp(-0.022 * dt);
+          rotZ += (targetRotZ - rotZ) * rotLerp;
+          tiltX += (targetTiltX - tiltX) * rotLerp;
+          tiltY += (targetTiltY - tiltY) * rotLerp;
+
+          // Lift & scale slightly while inhaling
+          const floatY = bob * 9 - holdCharge * 10;
+          const scale = 1 + holdCharge * 0.065 + releaseFlash * 0.018;
+          const totalZ = rotZ + sway;
+          vapeFloatEl.style.transform = `translate3d(${switchSlideOffset}px, ${floatY}px, 0) perspective(900px) rotateX(${tiltX.toFixed(
+            2
+          )}deg) rotateY(${tiltY.toFixed(2)}deg) rotateZ(${totalZ.toFixed(
+            2
+          )}deg) scale(${scale})`;
+
+          // 6. Reactive floor shadow: higher bob / inhale = smaller, lighter, blurrier
+          // Normalized height 0 (lowest bob) .. 1 (highest bob + inhale lift)
+          const heightFactor = Math.min(
+            1,
+            Math.max(0, (1 - bob) * 0.42 + holdCharge * 0.35)
+          );
+          const tiltStretch = 1 + (Math.abs(rotZ) / MAX_TILT_Z) * 0.25;
+          const shadowScaleX = (1.06 - heightFactor * 0.28) * tiltStretch;
+          const shadowScaleY = 1.05 - heightFactor * 0.24;
+          const shadowOffsetX = (rotZ / MAX_TILT_Z) * 14;
+          const shadowOpacity =
+            (darkMode ? 0.62 : 0.72) - heightFactor * 0.32;
+          const shadowBlur = (darkMode ? 10 : 8) + heightFactor * 7;
+          floorShadowEl.style.transform = `translateX(${shadowOffsetX.toFixed(
+            1
+          )}px) scale(${shadowScaleX}, ${shadowScaleY})`;
+          floorShadowEl.style.opacity = shadowOpacity.toFixed(3);
+          floorShadowEl.style.filter = `blur(${shadowBlur.toFixed(1)}px)`;
+
+          // 7. Ambient glow, tight halo, and LED tip intensity
+          const glowScale = 0.94 + breath * 0.1 + holdCharge * 0.34 + releaseFlash * 0.22;
+          const baseGlowOp = darkMode ? 0.58 : 0.46;
+          const glowOpacity = Math.min(
+            1,
+            (baseGlowOp + breath * 0.18 + holdCharge * 0.38 + releaseFlash * 0.4) *
+              (lowJuiceActive ? 0.6 + flicker * 0.4 : 1)
+          );
+          ambientGlowEl.style.transform = `translate(-50%, -50%) scale(${glowScale.toFixed(
+            3
+          )})`;
+          ambientGlowEl.style.opacity = glowOpacity.toFixed(3);
+
+          const haloScale = 1 + holdCharge * 0.22 + releaseFlash * 0.18;
+          const haloOpacity = Math.min(
+            1,
+            ((darkMode ? 0.56 : 0.35) + breath * 0.12 + holdCharge * 0.45 + releaseFlash * 0.4) *
+              (lowJuiceActive ? 0.5 + flicker * 0.5 : 1)
+          );
+          vapeHaloEl.style.transform = `translate(-50%, -50%) scale(${haloScale.toFixed(
+            3
+          )})`;
+          vapeHaloEl.style.opacity = haloOpacity.toFixed(3);
+
+          const ledScale = 0.85 + breath * 0.18 + holdCharge * 0.85 + releaseFlash * 0.95;
+          const ledOpacity = Math.min(
+            1,
+            (0.42 + breath * 0.16 + holdCharge * 0.58 + releaseFlash * 0.6) * flicker
+          );
+          ledTipEl.style.transform = `translate(-50%, -50%) scale(${ledScale.toFixed(
+            3
+          )})`;
+          ledTipEl.style.opacity = ledOpacity.toFixed(3);
+          ledStreakEl.style.opacity = Math.min(
+            1,
+            (0.15 + holdCharge * 0.75 + releaseFlash * 0.8) * flicker
+          ).toFixed(3);
+
+          // 8. Emit queued smoke particles progressively from live tip position
+          if (pendingEmissions.length > 0) {
+            const tip = getTipPosition();
+            for (let i = pendingEmissions.length - 1; i >= 0; i--) {
+              const job = pendingEmissions[i];
+
+              if (job.mode === "rings") {
+                while (job.ringTimes.length > 0 && now >= job.ringTimes[0]) {
+                  job.ringTimes.shift();
+                  for (let k = 0; k < job.pointsPerRing; k++) {
+                    spawnParticle(tip, job.charge, "rings", {
+                      index: k,
+                      total: job.pointsPerRing,
+                    });
+                  }
+                }
+                if (job.ringTimes.length === 0) {
+                  pendingEmissions.splice(i, 1);
+                }
+                continue;
+              }
+
+              const span = Math.max(1, job.endTime - job.startTime);
+              const progress = Math.min(1, (now - job.startTime) / span);
+              const expectedEmitted = Math.floor(progress * job.total);
+              const alreadyEmitted = job.total - job.remaining;
+              const toEmit = expectedEmitted - alreadyEmitted;
+
+              for (let k = 0; k < toEmit; k++) {
+                spawnParticle(tip, job.charge, job.mode, {
+                  index: job.emitted,
+                  total: job.total,
+                });
+                job.emitted++;
+                job.remaining--;
+              }
+              if (job.remaining <= 0 || progress >= 1) {
+                pendingEmissions.splice(i, 1);
+              }
+            }
+          }
+
+          // 9. Update & draw smoke particle canvas
+          ctx.clearRect(0, 0, canvasW, canvasH);
+          const dtSec = dt / 16.667;
+          for (let i = particles.length - 1; i >= 0; i--) {
+            const p = particles[i];
+            p.age += dt;
+            if (p.age >= p.life) {
+              particles.splice(i, 1);
+              continue;
+            }
+
+            const lifeT = p.age / p.life;
+            if (p.mode === "rings") {
+              p.vx = p.vx * 0.988 + p.ringExpandX * dtSec;
+              p.vy = p.vy * 0.988 + p.ringExpandY * dtSec - 0.012 * dtSec;
+            } else if (p.mode === "spiral") {
+              p.helixAngle += p.helixSpin * dtSec;
+              p.vx = p.vx * 0.96 + Math.cos(p.helixAngle) * p.helixAmp * 0.14 * dtSec;
+              p.vy = p.vy * 0.988 - 0.016 * dtSec;
+            } else {
+              const swirl =
+                Math.sin(now * p.swirlFreq + p.phase + p.age * 0.002) * p.swirlAmp;
+              p.vx = p.vx * 0.985 + swirl * 0.08 * dtSec;
+              p.vy = p.vy * 0.99 - 0.018 * dtSec;
+            }
+            p.x += p.vx * dtSec;
+            p.y += p.vy * dtSec;
+            p.size += p.growth * dtSec;
+
+            // Smooth fade-in then long fade-out
+            const fadeIn = Math.min(1, lifeT * 6);
+            const fadeOut = Math.pow(1 - lifeT, 1.45);
+            const alpha = p.alpha * fadeIn * fadeOut;
+
+            if (alpha <= 0.004) continue;
+
+            const half = p.size * 0.5;
+            // Neutral smoke base
+            ctx.globalAlpha = alpha;
+            ctx.drawImage(neutralSprite, p.x - half, p.y - half, p.size, p.size);
+
+            // Accent glow lighting near the vape that fades out farther away
+            const tintWeight = Math.max(0, 1 - lifeT * 2.4) * (darkMode ? 0.65 : 0.35);
+            if (tintWeight > 0.01) {
+              ctx.globalAlpha = alpha * tintWeight;
+              ctx.drawImage(accentSprite, p.x - half, p.y - half, p.size, p.size);
+            }
+          }
+          ctx.globalAlpha = 1;
+
+          requestAnimationFrame(tick);
+        }
+
+        /* =====================================================================
+           BOOT
+           ===================================================================== */
+        resizeCanvas();
+        renderDots();
+        syncSmokeSprites();
+        selectDesign(0, 0, true);
+
+        // Preload remaining designs silently so switching feels instant
+        DESIGNS.forEach((d, idx) => {
+          if (idx !== 0) prepareDesignImage(d, idx);
+        });
+
+        requestAnimationFrame(tick);
+      })();
+    </script>
+  </body>
+</html>
